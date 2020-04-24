@@ -1,77 +1,103 @@
-import React, { useRef } from 'react';
-import Helmet from 'react-helmet';
-import L from 'leaflet';
-import { Marker } from 'react-leaflet';
+import React from 'react'
+import Helmet from 'react-helmet'
+import L from 'leaflet'
+import axios from 'axios'
 
-import { promiseToFlyTo, getCurrentLocation } from 'lib/map';
+import Layout from 'components/Layout'
+import Map from 'components/Map'
 
-import Layout from 'components/Layout';
-import Container from 'components/Container';
-import Map from 'components/Map';
-
-import gatsby_astronaut from 'assets/images/gatsby-astronaut.jpg';
 
 const LOCATION = {
-  lat: 38.9072,
-  lng: -77.0369
-};
-const CENTER = [LOCATION.lat, LOCATION.lng];
-const DEFAULT_ZOOM = 2;
-const ZOOM = 10;
-
-const timeToZoom = 2000;
-const timeToOpenPopupAfterZoom = 4000;
-const timeToUpdatePopupAfterZoom = timeToOpenPopupAfterZoom + 3000;
-
-const popupContentHello = `<p>Hello 👋</p>`;
-const popupContentGatsby = `
-  <div class="popup-gatsby">
-    <div class="popup-gatsby-image">
-      <img class="gatsby-astronaut" src=${gatsby_astronaut} />
-    </div>
-    <div class="popup-gatsby-content">
-      <h1>Gatsby Leaflet Starter</h1>
-      <p>Welcome to your new Gatsby site. Now go build something great!</p>
-    </div>
-  </div>
-`;
+  lat: 0,
+  lng: 0
+}
+const CENTER = [LOCATION.lat, LOCATION.lng]
+const DEFAULT_ZOOM = 2
 
 const IndexPage = () => {
-  const markerRef = useRef();
-
   /**
    * mapEffect
    * @description Fires a callback once the page renders
    * @example Here this is and example of being used to zoom in and set a popup on load
    */
 
-  async function mapEffect({ leafletElement } = {}) {
-    if ( !leafletElement ) return;
+  async function mapEffect({ leafletElement: map } = {}) {
+    let response
 
-    const popup = L.popup({
-      maxWidth: 800
-    });
+    try {
+      response = await axios.get('https://corona.lmao.ninja/v2/countries')
+    } catch(e) {
+      console.log(`Failed to fetch countries: ${e.message}`, e)
+      return
+    }
 
-    const location = await getCurrentLocation().catch(() => LOCATION );
+    const { data = [] } = response
+    const hasData = Array.isArray(data) && data.length > 0
 
-    const { current = {} } = markerRef || {};
-    const { leafletElement: marker } = current;
+    if ( !hasData ) return
 
-    marker.setLatLng( location );
-    popup.setLatLng( location );
-    popup.setContent( popupContentHello );
+    const geoJson = {
+      type: 'FeatureCollection',
+      features: data.map((country = {}) => {
+        const { countryInfo: { lat, long: lng } = {} } = country
+        return {
+          type: 'Feature',
+          properties: {
+          ...country,
+          },
+          geometry: {
+            type: 'Point',
+            coordinates: [ lng, lat ]
+          }
+        }
+      })
+    }
 
-    setTimeout( async () => {
-      await promiseToFlyTo( leafletElement, {
-        zoom: ZOOM,
-        center: location
-      });
-
-      marker.bindPopup( popup );
-
-      setTimeout(() => marker.openPopup(), timeToOpenPopupAfterZoom );
-      setTimeout(() => marker.setPopupContent( popupContentGatsby ), timeToUpdatePopupAfterZoom );
-    }, timeToZoom );
+    const geoJsonLayers = new L.GeoJSON(geoJson, {
+      pointToLayer: (feature = {}, latlng) => {
+        const { properties = {} } = feature
+        let updatedFormatted
+        let casesString
+    
+        const {country, updated, cases, deaths, recovered } = properties
+    
+        casesString = `${cases}`
+    
+        if ( cases > 1000000 ) {
+          casesString = `${casesString.slice(0, -5)}M+`
+        } else if ( cases > 1000 ) {
+          casesString = `${casesString.slice(0, -3)}K+`
+        }
+    
+        if ( updated ) {
+          updatedFormatted = new Date(updated).toLocaleString()
+        }
+    
+        const html = `
+          <span class="icon-marker">
+            <span class="icon-marker-tooltip">
+              <h2>${country}</h2>
+              <ul>
+                <li><strong>Confirmed:</strong> ${cases}</li>
+                <li><strong>Deaths:</strong> ${deaths}</li>
+                <li><strong>Recovered:</strong> ${recovered}</li>
+                <li><strong>Last Update:</strong> ${updatedFormatted}</li>
+              </ul>
+            </span>
+            ${ casesString }
+          </span>
+        `
+    
+        return L.marker( latlng, {
+          icon: L.divIcon({
+            className: 'icon',
+            html
+          }),
+          riseOnHover: true
+        })
+      }
+    })
+    geoJsonLayers.addTo(map)
   }
 
   const mapSettings = {
@@ -79,7 +105,7 @@ const IndexPage = () => {
     defaultBaseMap: 'OpenStreetMap',
     zoom: DEFAULT_ZOOM,
     mapEffect
-  };
+  }
 
   return (
     <Layout pageName="home">
@@ -87,20 +113,9 @@ const IndexPage = () => {
         <title>Home Page</title>
       </Helmet>
 
-      <Map {...mapSettings}>
-        <Marker ref={markerRef} position={CENTER} />
-      </Map>
-
-      <Container type="content" className="text-center home-start">
-        <h2>Still Getting Started?</h2>
-        <p>Run the following in your terminal!</p>
-        <pre>
-          <code>gatsby new [directory] https://github.com/colbyfayock/gatsby-starter-leaflet</code>
-        </pre>
-        <p className="note">Note: Gatsby CLI required globally for the above command</p>
-      </Container>
+      <Map {...mapSettings} />
     </Layout>
-  );
-};
+  )
+}
 
-export default IndexPage;
+export default IndexPage
